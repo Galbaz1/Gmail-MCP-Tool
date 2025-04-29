@@ -1,0 +1,102 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+Understood. I will research how to extend the locally installed Gmail MCP server (cloned from GitHub) to add functionality for downloading email attachments. I will focus on identifying the necessary Gmail API methods, the correct places in the MCP server codebase to integrate this functionality, and a high-level overview of the code changes needed. I will get back to you shortly with a detailed plan.
+
+# Extending Gmail MCP Server to Download Email Attachments
+
+## Understanding the MCP Server Structure
+
+The Gmail MCP server is organized around **tools** – each tool corresponds to a specific Gmail operation (send email, read email, etc.). These tools are defined in the server’s code and exposed via a list of capabilities. In the code (`src/index.ts`), the server registers an array of tools (with a name, description, and input schema) in the **ListTools** handler, and implements each tool’s logic in a switch-case within the **CallTool** handler ([Gmail-MCP-Server/src/index.ts at main · GongRzhe/Gmail-MCP-Server · GitHub](https://github.com/GongRzhe/Gmail-MCP-Server/blob/main/src/index.ts#:~:text=server.setRequestHandler%28ListToolsRequestSchema%2C%20async%20%28%29%20%3D)) ([Gmail-MCP-Server/src/index.ts at main · GongRzhe/Gmail-MCP-Server · GitHub](https://github.com/GongRzhe/Gmail-MCP-Server/blob/main/src/index.ts#:~:text=switch%20%28name%29%20)). To add attachment downloading, we'll create a new tool (e.g. `"download_attachment"`) by inserting a new entry in these structures and writing a handler function for it.
+
+## Designing the "Download Attachment" Tool
+
+The new tool will allow clients to download an email attachment by specifying:
+- The **email message ID** (to identify the email that contains the attachment).
+- The **attachment ID** (the identifier Gmail uses for the specific attachment).
+When an email is fetched in "full" format, Gmail API provides an `attachmentId` for each attachment part ([Gmail-MCP-Server/src/index.ts at main · GongRzhe/Gmail-MCP-Server · GitHub](https://github.com/GongRzhe/Gmail-MCP-Server/blob/main/src/index.ts#:~:text=if%20%28part.body%20%26%26%20part.body.attachmentId%29%20)). The MCP server’s existing `read_email` tool already gathers attachment metadata (filename, MIME type, size, and attachmentId) from the message payload ([Gmail-MCP-Server/src/index.ts at main · GongRzhe/Gmail-MCP-Server · GitHub](https://github.com/GongRzhe/Gmail-MCP-Server/blob/main/src/index.ts#:~:text=if%20%28part.body%20%26%26%20part.body.attachmentId%29%20)) ([Gmail-MCP-Server/src/index.ts at main · GongRzhe/Gmail-MCP-Server · GitHub](https://github.com/GongRzhe/Gmail-MCP-Server/blob/main/src/index.ts#:~:text=const%20attachmentInfo%20%3D%20attachments.length%20,0)). Using that information, our new tool can retrieve the actual attachment content from Gmail.
+
+**Approach:** We will use the official Gmail API (via Google’s Node.js client) to fetch the attachment data. Gmail’s REST method `users.messages.attachments.get` returns the attachment’s content in a base64-encoded form ([googleapis documentation](https://googleapis.dev/nodejs/googleapis/latest/gmail/classes/Gmail.html#:~:text=,main%28%29.catch%28e%20%3D%3E)). We will integrate this call into the MCP server:
+- Define a new input schema (using Zod, as the project does) for the tool’s parameters.
+- Add a new tool entry to the tools list with its name, description, and schema.
+- Implement a new case in the request handler switch to call the Gmail API and return the attachment data. 
+
+No changes to server routing are needed – we’re leveraging the existing MCP request handling mechanism. The new tool will simply appear alongside existing ones in the capabilities.
+
+## Implementation Steps
+
+1. **Define the input schema:** Add a new Zod schema for the attachment download parameters in `src/index.ts`. For example:  
+   ```ts
+   const DownloadAttachmentSchema = z.object({
+     messageId: z.string().describe("ID of the email message containing the attachment"),
+     attachmentId: z.string().describe("ID of the attachment to download")
+   });
+   ```  
+   This schema ensures the tool is called with a valid `messageId` and `attachmentId`. (You might also give it a `.describe("Downloads an email attachment by ID")` for clarity.)
+
+2. **Register the new tool in the tools list:** In the **ListToolsRequest** handler where `server.setRequestHandler(ListToolsRequestSchema, ...)` returns the array of tools, add an entry for `"download_attachment"`. For example:  
+   ```ts
+   {
+     name: "download_attachment",
+     description: "Download an email attachment by message and attachment ID",
+     inputSchema: zodToJsonSchema(DownloadAttachmentSchema),
+   }
+   ```  
+   Insert this object into the `tools: [...]` array along with the other tools ([Gmail-MCP-Server/src/index.ts at main · GongRzhe/Gmail-MCP-Server · GitHub](https://github.com/GongRzhe/Gmail-MCP-Server/blob/main/src/index.ts#:~:text=server.setRequestHandler%28ListToolsRequestSchema%2C%20async%20%28%29%20%3D)). This makes the new capability discoverable by clients.
+
+3. **Implement the tool’s handler logic:** In the **CallToolRequest** handler (the big switch-case on tool name), add a case for `"download_attachment"`. It should parse the input, call Gmail API to fetch the attachment, and return the content. For example:  
+   ```ts
+   case "download_attachment": {
+     const { messageId, attachmentId } = DownloadAttachmentSchema.parse(args);
+     // Call Gmail API to get the attachment content
+     const res = await gmail.users.messages.attachments.get({
+       userId: "me",
+       messageId: messageId,
+       id: attachmentId
+     });
+     const attachmentBody = res.data;  // Gmail returns a MessagePartBody
+     // attachmentBody contains { size, attachmentId, data }:
+     const fileDataBase64 = attachmentBody.data || "";
+     // Return the base64 content as text (or save to disk as needed)
+     return {
+       content: [
+         { 
+           type: "text", 
+           text: `Attachment content (base64): ${fileDataBase64}` 
+         }
+       ]
+     };
+   }
+   ```  
+   In this handler, we use Google’s Node.js client (`gmail.users.messages.attachments.get`) with the **userId** set to `"me"`, plus the message ID and attachment ID ([googleapis documentation](https://googleapis.dev/nodejs/googleapis/latest/gmail/classes/Gmail.html#:~:text=,value%27%2C%20%2A)). This returns a `MessagePartBody` object containing the attachment’s data. The `data` field is a base64-encoded string of the file content ([googleapis documentation](https://googleapis.dev/nodejs/googleapis/latest/gmail/classes/Gmail.html#:~:text=,main%28%29.catch%28e%20%3D%3E)), which we can include in the response. 
+
+**Note:** Instead of returning the raw base64 string in the JSON response, you could also decode and save it to a file on the server if desired. For instance, to actually **download** the file to disk, decode the base64 and write to a file using Node’s filesystem API:  
+```ts
+const buffer = Buffer.from(fileDataBase64, "base64");
+fs.writeFileSync("<path>/<filename>", buffer);
+```  
+This would persist the attachment to a local file. (The Stack Overflow example below demonstrates writing the attachment to disk ([javascript - How do you download an attachment with Gmail API with nodejs? - Stack Overflow](https://stackoverflow.com/questions/51216410/how-do-you-download-an-attachment-with-gmail-api-with-nodejs#:~:text=const%20,Promise.resolve)).) In an MCP context, however, simply returning the base64 content may be sufficient for the AI assistant to utilize or forward the attachment.
+
+## Gmail API References
+
+To ensure correctness, refer to the official Gmail API documentation for attachments. The method `users.messages.attachments.get` requires the message ID and attachment ID, and it returns the attachment data in the response. According to Google’s documentation, a successful response contains the attachment’s ID, size, and a **`data`** field with the file content encoded in URL-safe Base64 ([googleapis documentation](https://googleapis.dev/nodejs/googleapis/latest/gmail/classes/Gmail.html#:~:text=,main%28%29.catch%28e%20%3D%3E)). The Node.js usage is straightforward: for example, the Google API client can be called as:  
+
+```js
+await gmail.users.messages.attachments.get({
+  userId: 'me',
+  messageId: '<MESSAGE_ID>',
+  id: '<ATTACHMENT_ID>'
+});
+```  
+
+This matches the usage in our handler (with `res.data` yielding the `MessagePartBody`). The official docs and code samples confirm this structure ([googleapis documentation](https://googleapis.dev/nodejs/googleapis/latest/gmail/classes/Gmail.html#:~:text=,value%27%2C%20%2A)) ([googleapis documentation](https://googleapis.dev/nodejs/googleapis/latest/gmail/classes/Gmail.html#:~:text=,main%28%29.catch%28e%20%3D%3E)). 
+
+With these changes in place, you have effectively added a new `"download_attachment"` tool to the Gmail MCP server. This tool validates the input, calls the Gmail API to retrieve the attachment, and provides the content (or saves it), enabling the AI or client to access email attachments through natural language commands.
+
+**Sources:**
+
+- Gmail API – Retrieving Message Attachments (Google Developers documentation) ([googleapis documentation](https://googleapis.dev/nodejs/googleapis/latest/gmail/classes/Gmail.html#:~:text=,value%27%2C%20%2A)) ([googleapis documentation](https://googleapis.dev/nodejs/googleapis/latest/gmail/classes/Gmail.html#:~:text=,main%28%29.catch%28e%20%3D%3E))  
+- Gmail MCP Server source code (tool registration and handler structure) ([Gmail-MCP-Server/src/index.ts at main · GongRzhe/Gmail-MCP-Server · GitHub](https://github.com/GongRzhe/Gmail-MCP-Server/blob/main/src/index.ts#:~:text=server.setRequestHandler%28ListToolsRequestSchema%2C%20async%20%28%29%20%3D)) ([Gmail-MCP-Server/src/index.ts at main · GongRzhe/Gmail-MCP-Server · GitHub](https://github.com/GongRzhe/Gmail-MCP-Server/blob/main/src/index.ts#:~:text=switch%20%28name%29%20))  
+- Stack Overflow example – downloading Gmail attachments in Node.js (illustrates base64 decoding and file write) ([javascript - How do you download an attachment with Gmail API with nodejs? - Stack Overflow](https://stackoverflow.com/questions/51216410/how-do-you-download-an-attachment-with-gmail-api-with-nodejs#:~:text=const%20,await%20fsPromises.writeFile%28attachmentPath%2C%20Buffer.from%28dataB64)) ([javascript - How do you download an attachment with Gmail API with nodejs? - Stack Overflow](https://stackoverflow.com/questions/51216410/how-do-you-download-an-attachment-with-gmail-api-with-nodejs#:~:text=const%20,Promise.resolve))

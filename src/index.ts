@@ -188,23 +188,29 @@ async function authenticate() {
 
 // Schema definitions
 const SendEmailSchema = z.object({
-    to: z.array(z.string()).describe("List of recipient email addresses"),
-    subject: z.string().describe("Email subject"),
-    body: z.string().describe("Email body content"),
+    to: z.array(z.string()).min(1).describe("List of recipient email addresses"),
     cc: z.array(z.string()).optional().describe("List of CC recipients"),
     bcc: z.array(z.string()).optional().describe("List of BCC recipients"),
-    threadId: z.string().optional().describe("Thread ID to reply to"),
+    subject: z.string().describe("Email subject"),
+    body: z.string().describe("Email body content"),
     inReplyTo: z.string().optional().describe("Message ID being replied to"),
-});
+    threadId: z.string().optional().describe("Thread ID to reply to"),
+}).describe("Sends or drafts a new email");
 
 const ReadEmailSchema = z.object({
     messageId: z.string().describe("ID of the email message to retrieve"),
+}).describe("Retrieves the content of a specific email");
+
+const DownloadAttachmentSchema = z.object({
+    messageId: z.string().describe("ID of the email message containing the attachment"),
+    attachmentId: z.string().describe("ID of the attachment to download"),
+    saveDirectory: z.string().optional().describe("Absolute path to the directory where the attachment should be saved. Defaults to /tmp/attachments/")
 });
 
 const SearchEmailsSchema = z.object({
     query: z.string().describe("Gmail search query (e.g., 'from:example@gmail.com')"),
     maxResults: z.number().optional().describe("Maximum number of results to return"),
-});
+}).describe("Searches for emails using Gmail search syntax");
 
 // Updated schema to include removeLabelIds
 const ModifyEmailSchema = z.object({
@@ -299,6 +305,11 @@ async function main() {
                 inputSchema: zodToJsonSchema(ReadEmailSchema),
             },
             {
+                name: "download_attachment",
+                description: "Downloads a specific attachment from an email message",
+                inputSchema: zodToJsonSchema(DownloadAttachmentSchema),
+            },
+            {
                 name: "search_emails",
                 description: "Searches for emails using Gmail search syntax",
                 inputSchema: zodToJsonSchema(SearchEmailsSchema),
@@ -350,6 +361,109 @@ async function main() {
             },
         ],
     }))
+
+    // Added handleDownloadAttachment function
+    async function handleDownloadAttachment(validatedArgs: any) {
+        const { messageId, attachmentId, saveDirectory } = validatedArgs;
+        const downloadDir = saveDirectory || '/tmp/attachments/'; // Default download directory
+
+        try {
+            // Ensure the download directory exists
+            if (!fs.existsSync(downloadDir)) {
+                fs.mkdirSync(downloadDir, { recursive: true });
+            }
+
+            // First, get attachment metadata (like filename) using the messages.get API
+            const msgResponse = await gmail.users.messages.get({
+                userId: 'me',
+                id: messageId,
+                format: 'full', // Request 'full' format to get payload parts
+            });
+
+            let filename = `attachment_${attachmentId}.dat`; // Default filename
+            let foundAttachment = false;
+
+            // Recursive function to find the attachment and its filename in the message structure
+            const findFilename = (parts: any[]) => {
+                if (!parts) return;
+                for (const part of parts) {
+                    if (part.body?.attachmentId === attachmentId) {
+                        filename = part.filename || filename;
+                        foundAttachment = true;
+                        return; // Found it, no need to search further in this branch
+                    }
+                    if (part.parts) {
+                        findFilename(part.parts);
+                        if (foundAttachment) return; // Stop searching if found in a sub-part
+                    }
+                }
+            };
+
+            // Start searching in the main payload parts
+            if (msgResponse.data.payload?.parts) {
+                findFilename(msgResponse.data.payload.parts);
+            }
+
+            // Handle cases where the attachment might be in the top-level payload body itself
+            // (e.g., single-part message that is just an attachment)
+            if (!foundAttachment && msgResponse.data.payload?.body?.attachmentId === attachmentId) {
+                filename = msgResponse.data.payload?.filename || filename;
+                foundAttachment = true;
+            }
+
+            if (!foundAttachment) {
+                throw new Error(`Attachment with ID ${attachmentId} not found in message ${messageId}`);
+            }
+
+            // Now get the actual attachment data using the attachments.get API
+            const attachmentResponse = await gmail.users.messages.attachments.get({
+                userId: 'me',
+                messageId: messageId,
+                id: attachmentId,
+            });
+
+            if (!attachmentResponse.data.data) {
+                throw new Error('No attachment data received from API.');
+            }
+
+            // Decode the base64url data provided by Gmail API
+            const fileData = Buffer.from(attachmentResponse.data.data.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+
+            // Construct the full save path, ensuring filename is sanitized if needed (basic example)
+            const sanitizedFilename = path.basename(filename); // Basic sanitization
+            const savePath = path.join(downloadDir, sanitizedFilename);
+
+            // Save the file
+            fs.writeFileSync(savePath, fileData);
+
+            console.log(`Attachment downloaded successfully to: ${savePath}`);
+            // Return a success message and the path
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `Attachment downloaded successfully to: ${savePath}`,
+                        result: { // Including structured result
+                            savedFilePath: savePath
+                        }
+                    }
+                ]
+            };
+
+        } catch (error: any) {
+            console.error('Error downloading attachment:', error);
+            // Provide a more informative error message if possible
+            const errorMessage = error.response?.data?.error?.message || error.message || 'Unknown error occurred';
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `Failed to download attachment: ${errorMessage}`,
+                    }
+                ]
+            };
+        }
+    }
 
     server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const { name, arguments: args } = request.params;
@@ -477,10 +591,12 @@ async function main() {
                     // Get attachment information
                     const attachments: EmailAttachment[] = [];
                     const processAttachmentParts = (part: GmailMessagePart, path: string = '') => {
-                        if (part.body && part.body.attachmentId) {
+                        // Ensure part.body and part.body.attachmentId are not null or undefined
+                        if (part.body?.attachmentId) {
                             const filename = part.filename || `attachment-${part.body.attachmentId}`;
+                            // Add the attachmentId to the pushed object
                             attachments.push({
-                                id: part.body.attachmentId,
+                                id: part.body.attachmentId, // Keep the attachment ID
                                 filename: filename,
                                 mimeType: part.mimeType || 'application/octet-stream',
                                 size: part.body.size || 0
@@ -498,10 +614,11 @@ async function main() {
                         processAttachmentParts(response.data.payload as GmailMessagePart);
                     }
 
-                    // Add attachment info to output if any are present
+                    // Add attachment info to output if any are present, including the attachment ID
                     const attachmentInfo = attachments.length > 0 ?
                         `\n\nAttachments (${attachments.length}):\n` +
-                        attachments.map(a => `- ${a.filename} (${a.mimeType}, ${Math.round(a.size/1024)} KB)`).join('\n') : '';
+                        // Update the map function to include the ID in the output string
+                        attachments.map(a => `- ${a.filename} (ID: ${a.id}, Type: ${a.mimeType}, Size: ${Math.round(a.size / 1024)} KB)`).join('\n') : '';
 
                     return {
                         content: [
@@ -511,6 +628,11 @@ async function main() {
                             },
                         ],
                     };
+                }
+
+                case "download_attachment": {
+                    const validatedArgs = DownloadAttachmentSchema.parse(args);
+                    return await handleDownloadAttachment(validatedArgs);
                 }
 
                 case "search_emails": {

@@ -1,0 +1,38 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Gmail MCP Server - Attachment Download Feature
+
+This rule provides an overview of the Gmail MCP Server codebase, focusing on the attachment download functionality implemented and tested.
+
+## Key Files & Components
+
+- **`[src/index.ts](mdc:src/index.ts)`**: This is the main server implementation file. It contains:
+    - The MCP server setup using `@modelcontextprotocol/sdk`.
+    - Definition and registration of all Gmail tools, including `download_attachment`.
+    - The Zod schema `DownloadAttachmentSchema` defining the input for the download tool.
+    - The handler function `handleDownloadAttachment` which contains the core logic for downloading attachments using the Gmail API.
+    - The server uses `StdioServerTransport`, meaning it communicates over standard input/output, not HTTP.
+
+- **`[test-direct-api.js](mdc:test-direct-api.js)`**: A test script created to directly test the attachment download logic using the Gmail API, mirroring the functionality within `handleDownloadAttachment`. This is useful for verifying the core download process independently of the MCP server framework.
+
+- **`[search-attachments.js](mdc:search-attachments.js)`**: A utility script to search for emails containing attachments using the Gmail API. It helps find `messageId` and `attachmentId` values needed for testing the download functionality.
+
+- **`[test-download.js](mdc:test-download.js)`**: An earlier test script, similar to `test-direct-api.js`, that tests attachment downloads directly via the Gmail API.
+
+## Core Functionality: `handleDownloadAttachment`
+
+Located in `[src/index.ts](mdc:src/index.ts)`, this asynchronous function:
+1.  Receives `messageId`, `attachmentId`, and an optional `saveDirectory`.
+2.  Uses `gmail.users.messages.get` to retrieve message details and find the correct attachment part to get the filename.
+3.  Uses `gmail.users.messages.attachments.get` to fetch the actual attachment data (base64 encoded).
+4.  Decodes the data and writes it to a file in the specified or default directory (`/tmp/attachments/`).
+5.  Returns the path to the saved file upon success or an error message.
+
+## Testing
+
+- Use `[search-attachments.js](mdc:search-attachments.js)` to find a message and attachment ID.
+- Use `[test-direct-api.js](mdc:test-direct-api.js)` (after updating it with the found IDs) to test the download logic directly.
+- The MCP server itself (running via `node dist/index.js`) handles the tool call, but direct testing via HTTP (`test-download-mcp.js`) or the MCP CLI (`test-mcp-download.js`) was problematic due to the server using `StdioServerTransport` and potential CLI issues.
