@@ -1,0 +1,43 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Step 1: Define Input Schema for Attachment Download
+
+## Task
+Define a new Zod schema for the `download_attachment` tool that validates the necessary parameters.
+
+## Prerequisites
+- Understanding of Zod schema validation
+- Familiarity with the Gmail API attachment structure
+
+## Implementation
+1. Open `src/index.ts`
+2. Locate the section where schemas are defined (around line 140-220)
+3. Add the following schema definition:
+
+```typescript
+const DownloadAttachmentSchema = z.object({
+  messageId: z.string().describe("ID of the email message containing the attachment"),
+  attachmentId: z.string().describe("ID of the attachment to download"),
+  saveDirectory: z.string().optional().describe("Absolute path to the directory where the attachment should be saved. Defaults to /tmp/attachments/")
+});
+```
+
+## Parameter Details
+- `messageId`: Unique identifier for the email message containing the attachment
+- `attachmentId`: Unique identifier for the specific attachment within the email
+- `saveDirectory`: (Optional) Path where the attachment should be saved; defaults to `/tmp/attachments/` if not provided
+
+## Validation
+The schema ensures:
+- Required parameters (messageId, attachmentId) are provided as strings
+- saveDirectory is optional and defaults to a system-provided location
+
+## Edge Cases
+- If saveDirectory is provided, ensure the implementation checks if the directory exists and is writable
+
+## Notes
+- The descriptions provided with each field will be used to generate API documentation
+- The schema follows the same pattern as other schemas in the codebase

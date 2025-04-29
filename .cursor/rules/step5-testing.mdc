@@ -1,0 +1,105 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Step 5: Testing the Attachment Download Functionality
+
+## Task
+Test the newly implemented `download_attachment` tool to ensure it works correctly with various types of attachments.
+
+## Prerequisites
+- Completed all implementation steps (1-4)
+- Running Gmail MCP server with authentication configured
+- Access to emails with attachments
+
+## Test Scenarios
+
+### 1. Basic Attachment Download
+1. First, use the `search_emails` tool to find an email with attachments:
+   ```json
+   {
+     "query": "has:attachment"
+   }
+   ```
+2. Note the message ID from the search results.
+3. Use the `read_email` tool to get details about the email and its attachments:
+   ```json
+   {
+     "messageId": "<message_id_from_search>"
+   }
+   ```
+4. Note the attachment ID, filename, and MIME type from the response.
+5. Use the `download_attachment` tool to download the attachment:
+   ```json
+   {
+     "messageId": "<message_id_from_search>",
+     "attachmentId": "<attachment_id_from_read_email>"
+   }
+   ```
+6. Verify that the attachment is downloaded to the default location and the filename matches.
+
+### 2. Custom Save Directory
+1. Repeat the steps to identify an email with an attachment.
+2. Use the `download_attachment` tool with a custom save directory:
+   ```json
+   {
+     "messageId": "<message_id>",
+     "attachmentId": "<attachment_id>",
+     "saveDirectory": "/path/to/custom/directory"
+   }
+   ```
+3. Verify that the attachment is saved to the specified directory.
+
+### 3. Different Attachment Types
+Test the tool with various attachment types:
+- Image file (JPEG, PNG)
+- Document (PDF, DOCX)
+- Compressed file (ZIP, RAR)
+- Text file (TXT, CSV)
+
+### 4. Error Handling
+Test error cases:
+1. Invalid message ID:
+   ```json
+   {
+     "messageId": "invalid_message_id",
+     "attachmentId": "<valid_attachment_id>"
+   }
+   ```
+2. Invalid attachment ID:
+   ```json
+   {
+     "messageId": "<valid_message_id>",
+     "attachmentId": "invalid_attachment_id"
+   }
+   ```
+3. Non-existent save directory (with no write permissions):
+   ```json
+   {
+     "messageId": "<valid_message_id>",
+     "attachmentId": "<valid_attachment_id>",
+     "saveDirectory": "/root/no_permission_dir"
+   }
+   ```
+
+## Verification Checklist
+- [ ] Attachment downloads successfully with correct filename
+- [ ] Custom save directory works as expected
+- [ ] Various attachment types are handled properly
+- [ ] Error cases return appropriate error messages
+- [ ] Large attachments download completely without corruption
+
+## Troubleshooting
+If you encounter issues:
+1. Check the server logs for error details
+2. Verify Gmail API access and permissions
+3. Check file system permissions for save directories
+4. Ensure the attachment actually exists in the specified email
+5. Verify that the correct messageId and attachmentId are being used
+
+## Next Steps
+After successful testing:
+1. Document the new functionality
+2. Update README or user documentation
+3. Consider performance optimizations if needed (especially for large attachments)

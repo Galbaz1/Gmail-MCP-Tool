@@ -1,0 +1,43 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Attachment Download Functionality for Gmail MCP Server
+
+## Project Overview
+This project aims to implement a new tool in the Gmail MCP Server that allows downloading email attachments. Currently, the server can only retrieve attachment metadata (filename, type, size) but lacks the ability to download the actual attachment content.
+
+## Author
+gongrzhe
+
+## Requirements
+1. Add a new MCP tool called `download_attachment`
+2. Allow users to specify which attachment to download using messageId and attachmentId
+3. Support saving attachments to a specified directory (with a default fallback)
+4. Return the path to the downloaded file
+5. Handle errors gracefully and provide informative error messages
+
+## Implementation Approach
+The implementation will follow the existing pattern for defining and registering MCP tools:
+1. Define a Zod schema for validating input parameters
+2. Implement a handler function that calls the Gmail API
+3. Register the new tool with the MCP server
+4. Add the handler logic to process requests for the new tool
+
+## Implementation Steps
+1. **Define Input Schema**: Create a schema requiring messageId and attachmentId, with optional saveDirectory
+2. **Implement Tool Handler**: Create an async function to process the download request
+3. **Register New Tool**: Add the tool definition to the tools array
+4. **Update Handler Logic**: Add a case to handle the download_attachment tool
+5. **Testing**: Test the implementation with various types of attachments
+
+## Success Criteria
+The implementation will be considered successful if:
+1. Attachments can be downloaded correctly with proper filenames
+2. The tool handles various attachment types properly
+3. Appropriate error handling is in place
+4. The returned path points to a valid, downloadable file
+
+## Related Files
+- [index.ts](mdc:src/index.ts) src/index.ts (Main server implementation)

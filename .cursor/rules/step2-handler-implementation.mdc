@@ -1,0 +1,129 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Step 2: Implement Attachment Download Handler
+
+## Task
+Implement the `handleDownloadAttachment` function that will process download requests and save attachment files to disk.
+
+## Prerequisites
+- Gmail API client initialization
+- File system operations (fs module)
+- Understanding of base64 encoding/decoding
+
+## Implementation
+1. Open `src/index.ts`
+2. Add the following imports if they don't already exist:
+```typescript
+import fs from 'fs';
+import path from 'path';
+```
+
+3. Define the handler function:
+```typescript
+async function handleDownloadAttachment(validatedArgs: any) {
+  const { messageId, attachmentId, saveDirectory } = validatedArgs;
+  const downloadDir = saveDirectory || '/tmp/attachments/'; // Default download directory
+
+  try {
+    // Ensure the download directory exists
+    if (!fs.existsSync(downloadDir)) {
+      fs.mkdirSync(downloadDir, { recursive: true });
+    }
+
+    // First, get attachment metadata (like filename) using the messages.get API
+    const msgResponse = await gmail.users.messages.get({
+      userId: 'me',
+      id: messageId,
+      format: 'full',
+    });
+
+    let filename = `attachment_${attachmentId}.dat`; // Default filename
+    let foundAttachment = false;
+
+    // Recursive function to find the attachment and its filename in the message structure
+    const findFilename = (parts: any[]) => {
+      if (!parts) return;
+      for (const part of parts) {
+        if (part.body?.attachmentId === attachmentId) {
+          filename = part.filename || filename;
+          foundAttachment = true;
+          return;
+        }
+        if (part.parts) {
+          findFilename(part.parts);
+          if (foundAttachment) return; // Stop searching if found
+        }
+      }
+    };
+
+    if (msgResponse.data.payload?.parts) {
+      findFilename(msgResponse.data.payload.parts);
+    }
+    // Handle cases where the attachment might be in the top-level payload (less common)
+    if (!foundAttachment && msgResponse.data.payload?.body?.attachmentId === attachmentId) {
+      filename = msgResponse.data.payload.filename || filename;
+      foundAttachment = true;
+    }
+
+    if (!foundAttachment) {
+      throw new Error(`Attachment with ID ${attachmentId} not found in message ${messageId}`);
+    }
+
+    // Now get the attachment data using the attachments.get API
+    const attachmentResponse = await gmail.users.messages.attachments.get({
+      userId: 'me',
+      messageId: messageId,
+      id: attachmentId,
+    });
+
+    if (!attachmentResponse.data.data) {
+      throw new Error('No attachment data received from API.');
+    }
+
+    // Decode the base64url data
+    const fileData = Buffer.from(attachmentResponse.data.data.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+
+    // Construct the full save path
+    const savePath = path.join(downloadDir, filename);
+
+    // Save the file
+    fs.writeFileSync(savePath, fileData);
+
+    console.log(`Attachment downloaded successfully to: ${savePath}`);
+    return { 
+      result: `Attachment downloaded successfully to: ${savePath}`, 
+      savedFilePath: savePath 
+    };
+
+  } catch (error: any) {
+    console.error('Error downloading attachment:', error);
+    // Provide a more informative error message if possible
+    const errorMessage = error.response?.data?.error?.message || error.message || 'Unknown error occurred';
+    return { error: `Failed to download attachment: ${errorMessage}` };
+  }
+}
+```
+
+## Function Logic
+1. **Validation**: Extract and validate input parameters
+2. **Directory Check**: Ensure the download directory exists
+3. **Get Email Details**: Fetch email metadata to find the attachment filename
+4. **Extract Filename**: Recursively search for the attachment in the email structure
+5. **Download Attachment**: Fetch the attachment data using the Gmail API
+6. **Decode and Save**: Convert from base64url to a binary buffer and save to disk
+7. **Return Result**: Return the saved file path or an error message
+
+## Error Handling
+The function handles various error cases:
+- Missing download directory (creates it if needed)
+- Attachment not found in the email
+- API errors when retrieving the attachment
+- File system errors when saving the attachment
+
+## Edge Cases
+- **Filename Conflicts**: If multiple attachments have the same name, they will overwrite each other. Consider adding a timestamp or unique identifier to the filename.
+- **Large Attachments**: Gmail API might have timeout issues with very large attachments. Consider implementing streaming or chunking for large files.
+- **MIME Types**: The function doesn't explicitly handle different MIME types. Consider adding MIME type detection and appropriate handling if needed.

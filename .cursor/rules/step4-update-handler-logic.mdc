@@ -1,0 +1,69 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Step 4: Update Handler Logic
+
+## Task
+Update the request handler to process the `download_attachment` tool when it's called.
+
+## Prerequisites
+- Completed schema definition (Step 1)
+- Completed handler implementation (Step 2)
+- Completed tool registration (Step 3)
+
+## Implementation
+1. Open `src/index.ts`
+2. Locate the `server.setRequestHandler(CallToolRequestSchema, async (request) => {...})` block (around line 320-430)
+3. Inside the handler, find the switch/if-else chain that routes requests to the appropriate tool handlers
+4. Add a new case to handle the 'download_attachment' tool:
+
+```typescript
+else if (name === 'download_attachment') {
+  const validatedArgs = DownloadAttachmentSchema.parse(args);
+  return await handleDownloadAttachment(validatedArgs);
+}
+```
+
+5. Add this case after the existing cases but before any default/error case.
+
+## Example
+The updated handler might look like this:
+
+```typescript
+server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  const { name, arguments: args } = request.params;
+
+  try {
+    // ... existing cases
+    else if (name === 'read_email') {
+      const validatedArgs = ReadEmailSchema.parse(args);
+      // Read email handler logic
+    }
+    else if (name === 'download_attachment') {
+      const validatedArgs = DownloadAttachmentSchema.parse(args);
+      return await handleDownloadAttachment(validatedArgs);
+    }
+    // ... other cases or default case
+  } catch (error: any) {
+    // Error handling
+  }
+});
+```
+
+## Validation
+1. Ensure the condition matches the exact tool name (`download_attachment`)
+2. Confirm that args are validated using the DownloadAttachmentSchema
+3. Verify the handler function is called with the validated arguments
+
+## Testing
+After implementing this change, you can test the functionality by:
+1. Starting the MCP server
+2. Using an MCP client to call the `download_attachment` tool with valid parameters
+3. Checking that the attachment is downloaded to the specified or default location
+
+## Notes
+- The handler should maintain consistent error handling with the rest of the application
+- Consider adding logging to help with debugging
+- The return format should match the expectations of MCP clients

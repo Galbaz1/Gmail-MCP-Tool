@@ -1,0 +1,61 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Step 3: Register the New Tool
+
+## Task
+Register the new `download_attachment` tool in the server's tools list.
+
+## Prerequisites
+- Completed schema definition (Step 1)
+- Understanding of the MCP server tool registration process
+
+## Implementation
+1. Open `src/index.ts`
+2. Locate the `server.setRequestHandler(ListToolsRequestSchema, async () => ({...}))` block (around line 250-320)
+3. Add the new tool definition to the `tools` array:
+
+```typescript
+{
+  name: "download_attachment",
+  description: "Downloads a specific attachment from an email message",
+  inputSchema: zodToJsonSchema(DownloadAttachmentSchema),
+},
+```
+
+4. The new tool should be added among the other email-related tools.
+
+## Example
+The updated tools array might look like this:
+
+```typescript
+server.setRequestHandler(ListToolsRequestSchema, async () => ({
+  tools: [
+    // ... existing tools
+    {
+      name: "read_email",
+      description: "Retrieves the content of a specific email",
+      inputSchema: zodToJsonSchema(ReadEmailSchema),
+    },
+    {
+      name: "download_attachment", // New tool
+      description: "Downloads a specific attachment from an email message",
+      inputSchema: zodToJsonSchema(DownloadAttachmentSchema),
+    },
+    // ... other tools
+  ],
+}))
+```
+
+## Verification
+To verify the tool registration:
+1. Ensure the tool name matches the handler implementation
+2. Confirm the inputSchema correctly references the DownloadAttachmentSchema
+3. Make sure the description accurately describes the tool's functionality
+
+## Notes
+- The order of tools in the array does not affect functionality but is important for user experience
+- The description will be displayed to users, so it should be clear and concise
+- Tool registration only makes the tool visible to clients; implementation (Step 4) is needed for it to function
